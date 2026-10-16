@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <span>
 #include <type_traits>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace PFnS {
@@ -12,7 +14,7 @@ namespace PFnS {
 enum NodeType : uint8_t {
     VARIABLE,  // aux = input index
     CONST,     // aux = number id
-    LINEAR,    // sum_i coeff_i * child_i + bias, count >= 0 (count == 0 is a constant)
+    LINEAR,    // sum_i coeff_i * child_i + bias, count >= 1 (empty sums collapse to CONST)
     MAX,       // max(a, b), operands sorted by id
     MIN,       // min(a, b), operands sorted by id
     DIV,       // floor(a / k), k > 0 enforced by the builder
@@ -21,16 +23,17 @@ enum NodeType : uint8_t {
 
 // Field meaning by type:
 //   type      count   first          aux
-//   VARIABLE  -       -              input index
-//   CONST     -       -              number id
+//   VARIABLE  -       0              input index
+//   CONST     -       0              number id
 //   LINEAR    #terms  offset in lin_ bias (NumId)
 //   MAX/MIN   -       child a        child b
 //   DIV       -       child a        divisor (NumId)
 //   EQC       -       child a (guard) child b (value)
+// Nodes are hash-consed: structurally equal nodes share one NodeId.
 struct Node {
     NodeType type;
-    uint8_t  flags;   // spare
-    uint16_t count;
+    uint8_t  flags;   // spare, must be 0 (not part of node identity)
+    uint16_t count;   // LINEAR term count; builder rejects > UINT16_MAX
     uint32_t first;
     uint32_t aux;
 };
@@ -41,7 +44,7 @@ struct LinTerm {
     NodeId child;
     NumId  coeff;
 };
-static_assert(sizeof(LinTerm) == 8);
+static_assert(sizeof(LinTerm) == 8);  // assumes 32-bit NodeId and NumId
 
 class Circuit {
 public:
@@ -56,6 +59,7 @@ public:
     NodeId add_eqc(NodeId guard, NodeId value);
 
     // Queries
+    // Spans/references returned here are invalidated by the next add_* call.
     size_t size() const { return nodes_.size(); }
     NodeType type(NodeId n) const { return nodes_[n.v].type; }
     NodeId a(NodeId n) const { return NodeId{nodes_[n.v].first}; }   // MAX/MIN/DIV/EQC
@@ -80,12 +84,23 @@ public:
 private:
     NumId intern(number_t v);            // later: inline small / GMP pool
 
+    // Hash-consing core. For a LINEAR candidate, its terms must already sit at
+    // the tail of lin_ starting at n.first; on a hit they are removed again.
+    NodeId   find_or_insert(Node n);
+    uint64_t hash_node(const Node& n) const;
+    bool     equal_nodes(const Node& x, const Node& y) const;
+    void     grow_table();
+
     std::vector<Node>      nodes_;
     std::vector<LinTerm>   lin_;
     std::vector<number_t>  nums_;        // number pool (deduped), swap for GMP later
+    std::unordered_map<number_t, uint32_t> num_index_;  // value -> index in nums_
     std::vector<NodeId>    outputs_;
-    // hash-consing table: open-addressing vector<NodeId>, added next
+    // Hash-consing table: open addressing, linear probing, power-of-two size,
+    // holds ids into nodes_. Empty slots hold the sentinel UINT32_MAX.
     std::vector<NodeId>    table_;
+    // Scratch for add_linear canonicalization (avoids a heap alloc per call).
+    std::vector<std::pair<uint32_t, number_t>> scratch_;
 };
 
 } // namespace PFnS
