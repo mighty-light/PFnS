@@ -1,27 +1,20 @@
 #pragma once
 
-#ifdef SKEPTICAL
-    #include <limits>
-#endif
+#include "config.hpp"
+
 #include <cstdint>
+#include <utility>
+#include <concepts>
 
 namespace PFnS {
 
-using endpoint_t = long long;
-#ifdef SKEPTICAL
-    constexpr auto endpoint_max = std::numeric_limits<endpoint_t>::max();
-    constexpr auto endpoint_min = std::numeric_limits<endpoint_t>::min();
-#endif
+enum NodeId : uint32_t {};
+enum NumId : uint32_t {};
+enum number_t : int64_t {};
 
+number_t operator+(number_t a, number_t b) {
+    return number_t(a + b);
+}
 
-struct NodeId { 
-    uint32_t v;
-};
-
-struct NumId {
-    uint32_t v;
-};
-
-using number_t = long long;
 
 }

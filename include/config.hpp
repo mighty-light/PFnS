@@ -1,3 +1,3 @@
 #pragma once
 
-#undef SKEPTICAL
+#define SKEPTICAL

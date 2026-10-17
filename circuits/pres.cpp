@@ -1,6 +1,8 @@
 #include "pres.hpp"
 
 #include <algorithm>
+#include <ranges>
+#include <functional>
 
 namespace PFnS {
 
@@ -52,7 +54,7 @@ uint64_t Circuit::hash_node(const Node& n) const {
     if (n.type == LINEAR) {
         const LinTerm* t = lin_.data() + n.first;
         for (uint32_t i = 0; i < n.count; ++i)
-            h = combine(h, pack(t[i].child.v, t[i].coeff.v));
+            h = combine(h, pack(t[i].child, t[i].coeff));
         return combine(h, n.aux);
     }
     return combine(h, pack(n.first, n.aux));
@@ -65,7 +67,7 @@ bool Circuit::equal_nodes(const Node& x, const Node& y) const {
     const LinTerm* tx = lin_.data() + x.first;
     const LinTerm* ty = lin_.data() + y.first;
     for (uint32_t i = 0; i < x.count; ++i)
-        if (tx[i].child.v != ty[i].child.v || tx[i].coeff.v != ty[i].coeff.v)
+        if (tx[i].child != ty[i].child || tx[i].coeff != ty[i].coeff)
             return false;
     return true;
 }
@@ -77,23 +79,20 @@ void Circuit::grow_table() {
     const size_t mask = cap - 1;
     for (uint32_t id = 0; id < nodes_.size(); ++id) {
         size_t i = hash_node(nodes_[id]) & mask;
-        while (table_[i].v != kEmpty) i = (i + 1) & mask;
+        while (table_[i] != kEmpty) i = (i + 1) & mask;
         table_[i] = NodeId{id};
     }
 }
 
 NodeId Circuit::find_or_insert(Node n) {
-    #ifdef SKEPTICAL
-        if (nodes_.size() >= kEmpty)
-            throw PFnS::exception_with_location("Too many nodes!");
-    #endif
+    skeptical_check(nodes_.size() < kEmpty, "Too many nodes!");
     // Keep load factor <= 0.5; every node is in the table, so load = nodes_.size().
     while ((nodes_.size() + 1) * 2 > table_.size()) grow_table();
 
     const size_t mask = table_.size() - 1;
     size_t i = hash_node(n) & mask;
-    while (table_[i].v != kEmpty) {
-        if (equal_nodes(nodes_[table_[i].v], n)) {
+    while (table_[i] != kEmpty) {
+        if (equal_nodes(nodes_[table_[i]], n)) {
             if (n.type == LINEAR)   // drop the tentative terms at the tail of lin_
                 lin_.erase(lin_.begin() + static_cast<std::ptrdiff_t>(n.first), lin_.end());
             return table_[i];
@@ -115,10 +114,6 @@ NumId Circuit::intern(number_t v) {
     return NumId{it->second};
 }
 
-number_t Circuit::coeff(NumId c) const { return nums_[c.v]; }
-number_t Circuit::bias(NodeId n) const { return nums_[nodes_[n.v].aux]; }
-number_t Circuit::divisor(NodeId n) const { return nums_[nodes_[n.v].aux]; }
-
 // ---------------------------------------------------------------------------
 // Builders: canonicalize, then find_or_insert
 // ---------------------------------------------------------------------------
@@ -127,47 +122,34 @@ NodeId Circuit::add_var(uint32_t input_index) {
 }
 
 NodeId Circuit::add_const(number_t v) {
-    return find_or_insert(Node{CONST, 0, 0, 0, intern(v).v});
+    return find_or_insert(Node{CONST, 0, 0, 0, intern(v)});
 }
 
 NodeId Circuit::add_max(NodeId a, NodeId b) {
-    #ifdef SKEPTICAL
-        if (a.v >= nodes_.size() || b.v >= nodes_.size())
-            throw PFnS::exception_with_location("Out of bounds!");
-    #endif
-    if (a.v == b.v) return a;           // max(x, x) = x
-    if (a.v > b.v) std::swap(a, b);     // commutative: sort by id
-    return find_or_insert(Node{MAX, 0, 0, a.v, b.v});
+    skeptical_check(a < nodes_.size() && b < nodes_.size(), "Out of bounds!");
+    if (a == b) return a;           // max(x, x) = x
+    if (a > b) std::swap(a, b);     // commutative: sort by id
+    return find_or_insert(Node{MAX, 0, 0, a, b});
 }
 
 NodeId Circuit::add_min(NodeId a, NodeId b) {
-    #ifdef SKEPTICAL
-        if (a.v >= nodes_.size() || b.v >= nodes_.size())
-            throw PFnS::exception_with_location("Out of bounds!");
-    #endif
-    if (a.v == b.v) return a;
-    if (a.v > b.v) std::swap(a, b);
-    return find_or_insert(Node{MIN, 0, 0, a.v, b.v});
+    skeptical_check(a < nodes_.size() && b < nodes_.size(), "Out of bounds!");
+    if (a == b) return a;
+    if (a > b) std::swap(a, b);
+    return find_or_insert(Node{MIN, 0, 0, a, b});
 }
 
 NodeId Circuit::add_div(NodeId a, number_t k) {
-    #ifdef SKEPTICAL
-        if (k <= 0)
-            throw PFnS::exception_with_location("Divisor must be positive!");
-        if (a.v >= nodes_.size())
-            throw PFnS::exception_with_location("Out of bounds!");
-    #endif
+    skeptical_check(k > 0, "Divisor must be positive!");
+    skeptical_check(a < nodes_.size(), "Out of bounds!");
     if (k == 1) return a;               // floor(x / 1) = x
-    return find_or_insert(Node{DIV, 0, 0, a.v, intern(k).v});
+    return find_or_insert(Node{DIV, 0, 0, a, intern(k)});
 }
 
 NodeId Circuit::add_eqc(NodeId guard, NodeId value) {
-    #ifdef SKEPTICAL
-        if (guard.v >= nodes_.size() || value.v >= nodes_.size())
-            throw PFnS::exception_with_location("Out of bounds!");
-    #endif
+    skeptical_check(guard < nodes_.size() && value < nodes_.size(), "Out of bounds!");
     // Order matters (guard, value): no operand sorting.
-    return find_or_insert(Node{EQC, 0, 0, guard.v, value.v});
+    return find_or_insert(Node{EQC, 0, 0, guard, value});
 }
 
 // Canonical form: terms sorted by child id, duplicate children merged,
@@ -177,27 +159,23 @@ NodeId Circuit::add_eqc(NodeId guard, NodeId value) {
 // the pool moves to GMP.
 NodeId Circuit::add_linear(std::span<const NodeId> ch,
                            std::span<const number_t> co, number_t bias) {
-    #ifdef SKEPTICAL
-        if (ch.size() != co.size())
-            throw PFnS::exception_with_location("Children/coefficients size mismatch!");
-        for (const NodeId c : ch)
-            if (c.v >= nodes_.size())
-                throw PFnS::exception_with_location("Out of bounds!");
-    #endif
+    skeptical_check(ch.size() == co.size(), "Children/coefficients size mismatch!");
+    for (const NodeId c : ch)
+        skeptical_check(c < nodes_.size(), "Out of bounds!");
 
     scratch_.clear();
     for (size_t i = 0; i < ch.size(); ++i)
-        scratch_.emplace_back(ch[i].v, co[i]);
-    std::sort(scratch_.begin(), scratch_.end(),
-              [](const auto& x, const auto& y) { return x.first < y.first; });
+        scratch_.emplace_back(ch[i], co[i]);
+
+    std::ranges::sort(scratch_, {}, &std::pair<uint32_t, number_t>::first);
 
     // Merge equal children in place, dropping terms whose coefficient cancels to 0.
     size_t out = 0;
     for (size_t i = 0; i < scratch_.size();) {
         const uint32_t child = scratch_[i].first;
-        number_t sum = 0;
+        number_t sum = number_t(0);
         for (; i < scratch_.size() && scratch_[i].first == child; ++i)
-            sum += scratch_[i].second;
+            sum = sum + scratch_[i].second;
         if (sum != 0) scratch_[out++] = {child, sum};
     }
     scratch_.resize(out);
@@ -206,17 +184,14 @@ NodeId Circuit::add_linear(std::span<const NodeId> ch,
     if (scratch_.size() == 1 && scratch_[0].second == 1 && bias == 0)
         return NodeId{scratch_[0].first};
 
-    #ifdef SKEPTICAL
-        if (scratch_.size() > UINT16_MAX)
-            throw PFnS::exception_with_location("Too many linear terms!");
-    #endif
+    skeptical_check(scratch_.size() <= UINT16_MAX, "Too many linear terms!");
 
     // Append tentatively; find_or_insert removes them again on a hit.
     const uint32_t offset = static_cast<uint32_t>(lin_.size());
     for (const auto& [child, c] : scratch_)
         lin_.push_back(LinTerm{NodeId{child}, intern(c)});
     return find_or_insert(Node{LINEAR, 0, static_cast<uint16_t>(scratch_.size()),
-                               offset, intern(bias).v});
+                               offset, intern(bias)});
 }
 
 } // namespace PFnS
