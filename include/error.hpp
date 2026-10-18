@@ -21,7 +21,7 @@ namespace PFnS
             : std::runtime_error(error_string(loc, err)) {}
     };
 
-    void skeptical_check(bool chk, std::string_view err, const std::source_location &loc = std::source_location::current())
+    inline void skeptical_check(bool chk, std::string_view err, const std::source_location &loc = std::source_location::current())
     {
 #ifdef SKEPTICAL
         if (!chk)
