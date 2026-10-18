@@ -5,13 +5,17 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <format>
 
 namespace PFnS
 {
 
     struct exception_with_location : public std::runtime_error
     {
-        static constexpr std::string error_string(const std::source_location &loc, std::string_view err);
+        static constexpr std::string error_string(const std::source_location &loc, std::string_view err)
+        {
+            return std::format("[{}@{}:{}] {}", loc.function_name(), loc.file_name(), loc.line(), err);
+        }
 
         constexpr exception_with_location(std::string_view err, const std::source_location &loc = std::source_location::current())
             : std::runtime_error(error_string(loc, err)) {}

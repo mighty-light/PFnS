@@ -60,7 +60,7 @@ namespace PFnS
         constexpr NodeId add_var(uint32_t input_index);
         constexpr NodeId add_const(number_t v);
         constexpr NodeId add_linear(std::span<const NodeId> ch,
-                          std::span<const number_t> co, number_t bias);
+                                    std::span<const number_t> co, number_t bias);
         constexpr NodeId add_max(NodeId a, NodeId b);
         constexpr NodeId add_min(NodeId a, NodeId b);
         constexpr NodeId add_div(NodeId a, number_t k); // asserts k > 0
@@ -87,8 +87,8 @@ namespace PFnS
         }
         constexpr NodeId b(NodeId n) const
         {
-            const Node& x = nodes_[n];
-            switch(x.type)
+            const Node &x = nodes_[n];
+            switch (x.type)
             {
 #ifdef SKEPTICAL
             case VARIABLE:
@@ -97,8 +97,8 @@ namespace PFnS
             case DIV:
                 throw exception_with_location("Not MAX/MIN/EQC");
 #endif
-                default:
-                    return NodeId{x.aux};            
+            default:
+                return NodeId{x.aux};
             }
         }
 
@@ -110,18 +110,21 @@ namespace PFnS
             return {lin_.data() + x.first, x.count};
         }
 
-        constexpr number_t bias(NodeId n) const {
-            const Node& x = nodes_[n];
+        constexpr number_t bias(NodeId n) const
+        {
+            const Node &x = nodes_[n];
             skeptical_check(x.type == LINEAR, "Not Linear");
             skeptical_check(x.aux < nums_.size(), "Out of bounds!");
             return nums_[x.aux];
         } // LINEAR, resolves NumId via pool
-        
-        constexpr number_t coeff(NumId c) const {
+
+        constexpr number_t coeff(NumId c) const
+        {
             skeptical_check(c < nums_.size(), "Out of bounds!");
             return nums_[c];
         }
-        constexpr number_t divisor(NodeId n) const {
+        constexpr number_t divisor(NodeId n) const
+        {
             skeptical_check(n < nodes_.size(), "Out of bounds!");
             const uint32_t x = nodes_[n].aux;
             skeptical_check(x < nums_.size(), "Out of bounds!");
@@ -134,17 +137,17 @@ namespace PFnS
             skeptical_check(n < nodes_.size(), "Out of bounds!");
             outputs_.push_back(n);
         }
-        const std::vector<NodeId> &outputs() const { return outputs_; }
+        constexpr const std::vector<NodeId> &outputs() const { return outputs_; }
 
     private:
-        NumId intern(number_t v); // later: inline small / GMP pool
+        constexpr NumId intern(number_t v); // later: inline small / GMP pool
 
         // Hash-consing core. For a LINEAR candidate, its terms must already sit at
         // the tail of lin_ starting at n.first; on a hit they are removed again.
-        NodeId find_or_insert(Node n);
-        uint64_t hash_node(const Node &n) const;
-        bool equal_nodes(const Node &x, const Node &y) const;
-        void grow_table();
+        constexpr NodeId find_or_insert(Node n);
+        constexpr uint64_t hash_node(const Node &n) const;
+        constexpr bool equal_nodes(const Node &x, const Node &y) const;
+        constexpr void grow_table();
 
         std::vector<Node> nodes_;
         std::vector<LinTerm> lin_;
